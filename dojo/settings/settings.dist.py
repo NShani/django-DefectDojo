@@ -663,6 +663,21 @@ DEDUPE_ALGO_HASH_CODE = 'hash_code'
 # Makes it possible to deduplicate on a technical id (same parser) and also on some functional fields (cross-parsers deduplication)
 DEDUPE_ALGO_UNIQUE_ID_FROM_TOOL_OR_HASH_CODE = 'unique_id_from_tool_or_hash_code'
 
+# makes it possible to deduplicate based on a custom configured set of attributes.
+DEDUPE_ALGO_ATTRIBUTE_CONFIG = 'configured_attributes'
+# Add the fields which should be considered when finding duplicate findings.
+# Add fields which are present in the DEDUPLICATION_ALLOWED_ATTRIBUTES list only.
+# DEDUPLICATION_ATTRIBUTES = []
+# List of fields that are known to be usable in finding duplicates.
+DEDUPLICATION_ALLOWED_ATTRIBUTES = ['title', 'cwe', 'endpoints', 'offset', 'line', 'file_path', 'sourcefile', 'param', 'url']
+# wso2 custom deduplication algorithm
+DEDUPE_ALGO_WSO2_CUSTOM = 'deduplication_wso2_custom'
+# Attributes used to identify duplicate findings
+DEDUPLICATION_ATTRIBUTES = {
+    'static': ['title', 'cwe', 'line'],
+    'dynamic': ['title', 'cwe', 'cve', 'endpoints']
+}
+
 # Choice of deduplication algorithm per parser
 # Key = the scan_type from factory.py (= the test_type)
 # Default is DEDUPE_ALGO_LEGACY
@@ -682,6 +697,8 @@ DEDUPLICATION_ALGORITHM_PER_PARSER = {
     # for backwards compatibility because someone decided to rename this scanner:
     'Symfony Security Check': DEDUPE_ALGO_HASH_CODE,
     'DSOP Scan': DEDUPE_ALGO_HASH_CODE,
+    'AA DEWANGI': DEDUPE_ALGO_WSO2_CUSTOM,
+    'AA': DEDUPE_ALGO_WSO2_CUSTOM
 }
 
 # ------------------------------------------------------------------------------

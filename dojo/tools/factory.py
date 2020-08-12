@@ -1,3 +1,4 @@
+from dojo.tools.aa.parser import AA
 from dojo.tools.burp.parser import BurpXmlParser
 from dojo.tools.dsop.parser import DsopParser
 from dojo.tools.nessus.parser import NessusCSVParser, NessusXMLParser
@@ -90,6 +91,8 @@ def import_parser_factory(file, test, active, verified, scan_type=None):
         parser = BurpXmlParser(file, test)
     elif scan_type == "Burp Enterprise Scan":
         parser = BurpEnterpriseHtmlParser(file, test)
+    elif scan_type == "AA DEWANGI":
+        parser = AA(file, test)
     elif scan_type == "Nessus Scan":
         filename = file.name.lower()
         if filename.endswith("csv"):

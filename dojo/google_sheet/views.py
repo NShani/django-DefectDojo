@@ -373,6 +373,8 @@ def sync_findings(request, tid, spreadsheetId):
                                 setattr(finding_db, column_name, True)
                             elif finding_sheet[index_of_column] == 'FALSE':
                                 setattr(finding_db, column_name, False)
+                            elif finding_sheet[index_of_column] == '':
+                                setattr(finding_db, column_name, None)
                             else:
                                 setattr(finding_db, column_name, finding_sheet[index_of_column])
                     elif column_name[:6] == '[note]' and column_name[-3:] == '_id':                      # Updating notes
@@ -460,8 +462,14 @@ def populate_sheet(tid, spreadsheetId):
     credentials = service_account.Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     sheets_service = googleapiclient.discovery.build('sheets', 'v4', credentials=credentials, cache_discovery=False)
     findings_list = get_findings_list(tid)
+    # findings_list = str(findings_list).replace("<Finding:","")
+    # findings_list = str(findings_list).replace(">","")
+    # findings_list=object(findings_list)
     row_count = len(findings_list)
     column_count = len(findings_list[0])
+    print("LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL")
+    print(findings_list)
+    print("PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP")
 
     # Create new sheet in the spreadsheet
     now = datetime.datetime.now()
@@ -500,6 +508,11 @@ def populate_sheet(tid, spreadsheetId):
     sheets_service.spreadsheets().batchUpdate(spreadsheetId=spreadsheetId, body=reqs).execute()
 
     # Update created sheet with finding details
+    print("?????????????????????????????????????")
+    print("spreadSheetId  : "+spreadsheetId )
+    print("sheet_title  : "+sheet_title )
+    print("findings_list  : "+str(findings_list) )
+    print("?????????????????????????????????????")
     result = sheets_service.spreadsheets().values().update(spreadsheetId=spreadsheetId,
                                                     range=sheet_title,
                                                     valueInputOption='RAW',
@@ -809,6 +822,7 @@ def get_findings_list(tid):
                 var = value.id
             elif type(value) == Sonarqube_Issue:
                 var = value.key
+                var = str(value.id) + ":" + value.title
             else:
                 var = value
             finding_details.append(var)

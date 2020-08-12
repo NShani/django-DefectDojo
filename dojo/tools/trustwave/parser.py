@@ -1,4 +1,4 @@
-# Based on CSV, but rewrote because
+    # Based on CSV, but rewrote because
 # values in different columns required concatinaton
 
 import io

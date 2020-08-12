@@ -84,6 +84,7 @@ def is_deduplication_on_engagement_mismatch(new_finding, to_duplicate_finding):
 
 @receiver(dedupe_signal, sender=Finding)
 def sync_dedupe(sender, *args, **kwargs):
+    attributes = settings.DEDUPLICATION_ATTRIBUTES['dynamic']
     try:
         enabled = System_Settings.objects.get().enable_deduplication
     except System_Settings.DoesNotExist:
@@ -107,6 +108,26 @@ def sync_dedupe(sender, *args, **kwargs):
                 deduplicate_hash_code(new_finding)
             elif(deduplicationAlgorithm == settings.DEDUPE_ALGO_UNIQUE_ID_FROM_TOOL_OR_HASH_CODE):
                 deduplicate_uid_or_hash_code(new_finding)
+            elif(deduplicationAlgorithm == settings.DEDUPE_ALGO_WSO2_CUSTOM):
+                if hasattr(settings, 'DEDUPLICATION_ATTRIBUTES'):
+                    if new_finding.dynamic_finding == True:
+                        attributes = settings.DEDUPLICATION_ATTRIBUTES['dynamic']
+                    elif new_finding.static_finding == True:
+                        attributes = settings.DEDUPLICATION_ATTRIBUTES['static']
+                    deduplication_wso2_custom(new_finding, attributes)
+                else:
+                    deduplicate_legacy(new_finding)
+            elif (deduplicationAlgorithm == settings.DEDUPE_ALGO_ATTRIBUTE_CONFIG) and hasattr(settings,
+                                                                                               'DEDUPLICATION_ATTRIBUTES') and hasattr(
+                    settings, 'DEDUPLICATION_ALLOWED_ATTRIBUTES'):
+                configured_attributes = settings.DEDUPLICATION_ATTRIBUTES
+                if (all(elem in settings.DEDUPLICATION_ALLOWED_ATTRIBUTES for elem in configured_attributes)):
+                    deduplication_attr_config(new_finding, configured_attributes)
+                else:
+                    deduplicationLogger.debug(
+                        "configuration error: some elements of DEDUPLICATION_ATTRIBUTES are not in the allowed list DEDUPLICATION_ALLOWED_ATTRIBUTES."
+                        "using legacy algorithm")
+                    deduplicate_legacy(new_finding)
             else:
                 deduplicate_legacy(new_finding)
         else:
@@ -253,6 +274,66 @@ def deduplicate_hash_code(new_finding):
         break
 
 
+def deduplication_attr_config(new_finding, attributes):
+    if new_finding.test.engagement.deduplication_on_engagement:
+        existing_findings = Finding.objects.filter(
+            test__engagement=new_finding.test.engagement).exclude(
+            id=new_finding.id).exclude(duplicate=True)
+    else:
+        existing_findings = Finding.objects.filter(
+            test__engagement__product=new_finding.test.engagement.product).exclude(
+            id=new_finding.id).exclude(duplicate=True)
+
+    if 'offset' in attributes and 'line' in attributes:
+        attributes.remove('line')
+    for attr in attributes:
+        if attr == 'endpoints' or attr == 'offset':
+            continue
+        my_filter = {}
+        my_filter[attr] = getattr(new_finding, attr)
+        existing_findings = existing_findings.filter(**my_filter)
+
+    original_findings = []
+    findings_set_for_offset = []
+    for finding in existing_findings:
+        if is_deduplication_on_engagement_mismatch(new_finding, finding):
+            deduplicationLogger.debug(
+                'deduplication_on_engagement_mismatch, skipping dedupe.')
+            continue
+        if new_finding.dynamic_finding is True:
+            if 'endpoints' in attributes:
+                if finding.endpoints.count() != 0 and new_finding.endpoints.count() != 0:
+                    list1 = [e.host_with_port for e in new_finding.endpoints.all()]
+                    list2 = [e.host_with_port for e in finding.endpoints.all()]
+                    if all(x in list1 for x in list2):
+                        original_findings.append(finding)
+            else:
+                original_findings.append(finding)
+
+        elif new_finding.static_finding is True:
+            if 'offset' in attributes:
+                findings_set_for_offset.append(finding)
+                if finding.line == new_finding.line:
+                    original_findings.append(finding)
+            else:
+                original_findings.append(finding)
+
+    if not original_findings and new_finding.static_finding is True and 'offset' in attributes:
+        similar_findings_with_offset = list(filter(lambda i: abs(i.line - int(new_finding.line)) <= 100, findings_set_for_offset))
+        if similar_findings_with_offset:
+            for finding in similar_findings_with_offset:
+                finding.line_diff = abs(finding.line - int(new_finding.line))
+            original_findings = sorted(similar_findings_with_offset, key=lambda x: x.line_diff)
+
+    for find in original_findings:
+        try:
+            set_duplicate(new_finding, find)
+        except Exception as e:
+            deduplicationLogger.debug(str(e))
+            continue
+        break
+
+
 def deduplicate_uid_or_hash_code(new_finding):
     if new_finding.test.engagement.deduplication_on_engagement:
         existing_findings = Finding.objects.filter(
@@ -384,6 +465,193 @@ def rename_whitesource_finding():
         finding.title = titlecase(finding.title)
         finding.hash_code = finding.compute_hash_code()
         finding.save()
+
+
+def get_original_finding(new_finding, attributes, similar_findings_set):
+    # original_findings = []
+    print(":::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::")
+    print(similar_findings_set)
+    # print(similar_findings_set.count())
+    # print(similar_findings_set.pop(1))
+    if similar_findings_set:
+        print(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 10")
+        original_findings = []
+        print(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;; 11")
+        print(new_finding.title)
+        print(new_finding)
+        print(new_finding.dynamic_finding)
+        print(new_finding.static_finding)
+
+        if new_finding.dynamic_finding == True:
+            print(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;")
+            if 'endpoints' in attributes:
+                for finding in similar_findings_set:
+                    if finding.endpoints.count() != 0 and new_finding.endpoints.count() != 0:
+                        list1 = [e.host_with_port for e in new_finding.endpoints.all()]
+                        list2 = [e.host_with_port for e in finding.endpoints.all()]
+                        if all(x in list1 for x in list2):
+                            original_findings.append(finding)
+                if original_findings:
+                    original_finding = sorted(original_findings , key = lambda x : x.id, reverse=True)[0]
+                else:
+                    original_finding = None
+            else:
+                original_finding = sorted(similar_findings_set , key = lambda x : x.id, reverse=True)[0] # Change to use python sort by
+
+        elif new_finding.static_finding == True:
+            print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  1")
+            if 'offset' in attributes:
+                print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  2")
+                for finding in similar_findings_set:
+                    print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  4")
+                    if finding.line == int(new_finding.line):
+                        print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  5")
+                        original_findings.append(finding)
+                if original_findings:
+                    print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  6")
+                    original_finding = sorted(original_findings , key = lambda x : x.id, reverse=True)[0]
+                else:
+                    print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  7")
+                    original_finding = None
+            else:
+                print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  3")
+                original_finding = sorted(similar_findings_set , key = lambda x : x.id, reverse=True)[0] # Change to use python sort by
+    else:
+        print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  8")
+        original_finding = None
+    print("}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}  9")
+    return original_finding
+
+
+def deduplication_wso2_custom(new_finding, attributes):
+    system_settings = System_Settings.objects.get()
+    if system_settings.enable_deduplication:
+        if new_finding.duplicate == False:
+            deduplicationLogger.debug('sync_dedupe for: ' + str(new_finding.id) + ":" + str(new_finding.title))
+            finding_filtered = Finding.objects.all().exclude(id=new_finding.id)
+            print("INSIDE THE WSO@ CUSTOM ALGO __________________________________________________________________________")
+            if 'offset' in attributes and 'line' in attributes:
+                attributes.remove('line')
+            for attr in attributes:
+                if attr == 'endpoints' or attr == 'offset':
+                    continue
+                my_filter = {}
+                my_filter[attr] = getattr(new_finding, attr)
+                finding_filtered = finding_filtered.filter(**my_filter)
+
+            similar_findings_product = finding_filtered.filter(
+                test__engagement__product=new_finding.test.engagement.product)
+            similar_findings_product = list(similar_findings_product)
+            original_finding = get_original_finding(new_finding, attributes, similar_findings_product)
+
+            print(original_finding.notes)
+            print("+++++++++++++++++++++++++++++++++++")
+            if original_finding is None:
+                product_name = new_finding.test.engagement.product.name
+                print(product_name)
+                print("+++++++++++++++++++++++++++++++++++  1")
+                product_name = product_name.split('-')[0]                       # Has to be changed according to the naming convention used in WSO2
+                print(product_name)
+                print("+++++++++++++++++++++++++++++++++++  2")
+                similar_findings_product_versions = finding_filtered.filter(
+                    test__engagement__product__name__startswith=product_name).exclude(
+                    test__engagement__product=new_finding.test.engagement.product)
+                print(similar_findings_product_versions)
+                print("+++++++++++++++++++++++++++++++++++  3")
+                similar_findings_product_versions = list(similar_findings_product_versions)
+                original_finding = get_original_finding(new_finding, attributes, similar_findings_product_versions)
+
+                if original_finding is None:
+                    similar_findings_db = finding_filtered.exclude(test__engagement__product__name__startswith=product_name)
+                    similar_findings_db = list(similar_findings_db)
+                    original_finding = get_original_finding(new_finding, attributes, similar_findings_db)
+
+                    if original_finding is None and new_finding.static_finding == True and 'offset' in attributes:
+                        deduplicationLogger.info("duplicate found - not exactly")
+                        original_findings = []
+                        original_with_min_linediff_product = get_original_finding_with_min_line_diff(new_finding, similar_findings_product)
+                        if original_with_min_linediff_product is not None:
+                            original_findings.append(original_with_min_linediff_product)
+                        original_with_min_linediff_product_versions = get_original_finding_with_min_line_diff(new_finding, similar_findings_product_versions)
+                        if original_with_min_linediff_product_versions is not None:
+                            original_findings.append(original_with_min_linediff_product_versions)
+                        original_with_min_linediff_db = get_original_finding_with_min_line_diff(new_finding, similar_findings_db)
+                        if original_with_min_linediff_db is not None:
+                            original_findings.append(original_with_min_linediff_db)
+                        if original_findings:
+                            original_finding = sorted(original_findings , key = lambda x : x.line_diff)[0]
+                        else:
+                            original_finding = None
+
+            if original_finding is not None:
+                print("+++++++++++++++++++++++++++++++++++  4")
+                print(new_finding.notes.all())
+                print(original_finding.notes.all())
+                # print(new_finding.notes[0])
+                # print(original_finding.notes[0])
+                notes = original_finding.notes.all()
+                new_notes = new_finding.notes.all()
+                print("_______________________________________")
+
+                note1 = notes.filter(note_type__name="Use Case")
+                print(note1)
+                note2 = notes.filter(note_type__name="Vulnerability Influence")
+                print(note2)
+                note3 = new_notes.filter(note_type__name="Use Case")
+                print(note3)
+                note4 = new_notes.filter(note_type__name="Vulnerability Influence")
+                print(note4)
+                print("_______________________________________")
+                print(note1.values('entry'))
+                print(note3.values('entry'))
+                print(note2.values('entry'))
+                print(note4.values('entry'))
+
+
+                if not note3:
+                    print("NOTE 3 IS NULL")
+                else:
+                    print(str(note3.values('entry')) == str(note1.values('entry')))
+                    if (str(note3.values('entry')) == str(note1.values('entry'))):
+                        print("_______________________________________  1111")
+                        new_finding.notes.remove(note3[0])
+                if not note4:
+                    print("NOTE 4 IS NULL")
+                else:
+                    print(str(note4.values('entry')) == str(note2.values('entry')))
+                    if (str(note4.values('entry')) == str(note2.values('entry'))):
+                        print("_______________________________________  2222")
+                        new_finding.notes.remove(note4[0])
+                # for note in notes:
+                #     print("________________________________________ 1")
+                #     print(note)
+                #     new_finding.notes.add(note)
+                #     if(note.note_type.name == "Use Case"):
+                #         Notes.
+                #         new_finding.notes.add()
+                print("+++++++++++++++++++++++++++++++++++  5")
+                deduplicationLogger.debug('New finding ' + str(new_finding.id) + ' is a duplicate of existing finding ' + str(original_finding.id))
+                new_finding.duplicate = True
+                new_finding.active = False
+                new_finding.verified = False
+                new_finding.duplicate_finding = original_finding
+                # original_finding.duplicate_list.add(new_finding)
+                original_finding.found_by.add(new_finding.test.test_type)
+                super(Finding, new_finding).save()
+
+
+def get_original_finding_with_min_line_diff(new_finding, similar_findings):
+    original_finding = None
+    print("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+    print(similar_findings)
+    print(new_finding.line)
+    print(similar_findings.count())
+    similar_findings_with_offset = list(filter(lambda i: abs(i.line - int(new_finding.line)) <= 100, similar_findings))
+    if similar_findings_with_offset:
+        for finding in similar_findings_with_offset:
+            finding.line_diff = abs(finding.line - int(new_finding.line))
+        original_finding = sorted(similar_findings_with_offset , key = lambda x : (x.line_diff, -(x.id)))[0]
+    return original_finding
 
 
 def sync_rules(new_finding, *args, **kwargs):

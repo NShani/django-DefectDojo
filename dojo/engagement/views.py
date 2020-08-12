@@ -603,6 +603,7 @@ def import_scan_results(request, eid=None, pid=None):
                     if jform.is_valid():
                         push_to_jira = jform.cleaned_data.get('push_to_jira')
 
+                i = 0
                 for item in parser.items:
                     print("item blowup")
                     print(item)
@@ -687,6 +688,23 @@ def import_scan_results(request, eid=None, pid=None):
                                 item.notes.add(note)
 
                     item.save(false_history=True, push_to_jira=push_to_jira)
+
+                    if parser.note1 is not None:
+                        if str(parser.note1[i].entry) != ("nan"):
+                            item.notes.add(parser.note1[i])
+
+                    if parser.note2 is not None:
+                        if str(parser.note2[i].entry) != "nan":
+                            item.notes.add(parser.note2[i])
+
+                    if parser.note5 is not None:
+                        if str(parser.note5[i].entry) != "nan":
+                            item.notes.add(parser.note5[i])
+
+                    if parser.note6 is not None:
+                        if str(parser.note6[i].entry) != "nan":
+                            item.notes.add(parser.note6[i])
+                    i += 1
 
                     if item.unsaved_tags is not None:
                         item.tags = item.unsaved_tags

@@ -27,7 +27,7 @@ def common_note(request):
     add_breadcrumb(title="Common Note List", top_level=True, request=request)
 
     return render(request, 'dojo/common_note.html', {
-        'name': 'Common Note List',
+        'name': 'Common Note List222',
         'metric': False,
         'user': request.user,
         'cns': cns,
